@@ -9,6 +9,7 @@ import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
+import android.util.Log;
 
 import com.android.vending.billing.IInAppBillingService;
 import com.facebook.react.bridge.Arguments;
@@ -305,16 +306,14 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
     public void consumePurchase(final String purchaseToken, final Promise promise) {
         try {
             mService.consumePurchase(BILLING_API_VERSION, mActivityContext.getPackageName(), purchaseToken);
-//            promise.resolve("product consumed");      // is this necessary?
         } catch (Exception e) {
             promise.reject(e.getMessage());
         }
     }
 
     @ReactMethod
-    public void purchaseProduct(final String productId, final Promise promise) {
-        // TODO: Generate a more secure token for verifying purchases
-        String token = UUID.randomUUID().toString();
+    public void purchaseProduct(final String productId, final String token, final Promise promise) {
+Log.i("greer", "testing purchaseProduct");
         Purchase purchase = new Purchase(productId, token, promise);
 
         // Android provides us "onActivityResult" to handle purchase requests
