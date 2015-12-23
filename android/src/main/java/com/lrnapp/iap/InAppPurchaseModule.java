@@ -46,19 +46,33 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
     private static final int BILLING_API_VERSION = 3;
     private static final int BILLING_RESPONSE_RESULT_OK = 0;
 
+    // prop values from: http://developer.android.com/google/play/billing/billing_reference.html
+    // on 12/22/2015
+    private static final String PROP_PRODUCT_ID = "productId";
+
     private static final String PROP_AUTO_RENEWING = "autoRenewing";
     private static final String PROP_ORDER_ID = "orderId";
     private static final String PROP_PACKAGE_NAME = "packageName";
-    private static final String PROP_PRODUCT_ID = "productId";
     private static final String PROP_PURCHASE_TIME = "purchaseTime";
+    // valid purchase states: 0 (purchased), 1 (canceled), or 2 (refunded)
     private static final String PROP_PURCHASE_STATE = "purchaseState";
     private static final String PROP_PURCHASE_TOKEN = "purchaseToken";
     private static final String PROP_DEVELOPER_PAYLOAD = "developerPayload";
+
+    // expected data returned from getSkuDetails() method
+    private static final String PROP_TYPE = "type";
+    private static final String PROP_PRICE = "price";
+    private static final String PROP_PRICE_AMOUNT_MICROS = "price_amount_micros";
+    private static final String PROP_PRICE_CURRENCY_CODE = "price_currency_code";
+    private static final String PROP_TITLE = "title";
+    private static final String PROP_DESCRIPTION = "description";
+
 
     private static final String ERROR_PRODUCTS_LOAD_FAILED = "Failed to load products";
     private static final String ERROR_PURCHASE_VERIFICATION_FAILED = "Failed to verify purchase";
     private static final String ERROR_PURCHASE_CANCELLED = "Purchase was cancelled";
     private static final String ERROR_PURCHASE_UNKNOWN = "An error occurred while purchase";
+
 
     private static final class Purchase {
         private String mProductId;
@@ -124,15 +138,37 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
         JSONObject object = new JSONObject(data);
 
         WritableMap map = Arguments.createMap();
-
-        map.putBoolean(PROP_AUTO_RENEWING, object.getBoolean(PROP_AUTO_RENEWING));
-        map.putString(PROP_ORDER_ID, object.getString(PROP_ORDER_ID));
-        map.putString(PROP_PACKAGE_NAME, object.getString(PROP_PACKAGE_NAME));
         map.putString(PROP_PRODUCT_ID, object.getString(PROP_PRODUCT_ID));
-        map.putInt(PROP_PURCHASE_TIME, object.getInt(PROP_PURCHASE_TIME));
-        map.putInt(PROP_PURCHASE_STATE, object.getInt(PROP_PURCHASE_STATE));
-        map.putString(PROP_PURCHASE_TOKEN, object.getString(PROP_PURCHASE_TOKEN));
-        map.putString(PROP_DEVELOPER_PAYLOAD, object.getString(PROP_DEVELOPER_PAYLOAD));
+
+        // fields specific to getSkuDetails()
+        if (object.has(PROP_TYPE))
+            map.putString(PROP_TYPE, object.getString(PROP_TYPE));
+        if (object.has(PROP_PRICE))
+            map.putString(PROP_PRICE, object.getString(PROP_PRICE));
+        if (object.has(PROP_PRICE_AMOUNT_MICROS))
+            map.putInt(PROP_PRICE_AMOUNT_MICROS, object.getInt(PROP_PRICE_AMOUNT_MICROS));
+        if (object.has(PROP_PRICE_CURRENCY_CODE))
+            map.putString(PROP_PRICE_CURRENCY_CODE, object.getString(PROP_PRICE_CURRENCY_CODE));
+        if (object.has(PROP_TITLE))
+            map.putString(PROP_TITLE, object.getString(PROP_TITLE));
+        if (object.has(PROP_DESCRIPTION))
+            map.putString(PROP_DESCRIPTION, object.getString(PROP_DESCRIPTION));
+
+        // fields specific to get purchases & after a purchase
+        if (object.has(PROP_AUTO_RENEWING))
+            map.putBoolean(PROP_AUTO_RENEWING, object.getBoolean(PROP_AUTO_RENEWING));
+        if (object.has(PROP_ORDER_ID))
+            map.putString(PROP_ORDER_ID, object.getString(PROP_ORDER_ID));
+        if (object.has(PROP_PACKAGE_NAME))
+            map.putString(PROP_PACKAGE_NAME, object.getString(PROP_PACKAGE_NAME));
+        if (object.has(PROP_PURCHASE_TIME))
+            map.putString(PROP_PURCHASE_TIME, object.getString(PROP_PURCHASE_TIME));
+        if (object.has(PROP_PURCHASE_STATE))
+            map.putString(PROP_PURCHASE_STATE, object.getString(PROP_PURCHASE_STATE));
+        if (object.has(PROP_PURCHASE_TOKEN))
+            map.putString(PROP_PURCHASE_TOKEN, object.getString(PROP_PURCHASE_TOKEN));
+        if (object.has(PROP_DEVELOPER_PAYLOAD))
+            map.putString(PROP_DEVELOPER_PAYLOAD, object.getString(PROP_DEVELOPER_PAYLOAD));
 
         return map;
     }
@@ -157,8 +193,8 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
         if (pendingPurchase != null) {
             try {
                 WritableMap details = convertDataToMap(data);
-
-                if (pendingPurchase.getToken().equals(details.getString(PROP_PURCHASE_TOKEN))) {
+                // check developer token is valid
+                if (pendingPurchase.getToken().equals(details.getString(PROP_DEVELOPER_PAYLOAD))) {
                     pendingPurchase.getPromise().resolve(details);
                 } else {
                     onPurchaseError(ERROR_PURCHASE_VERIFICATION_FAILED);
@@ -182,30 +218,24 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
                 }
 
                 Bundle querySkus = new Bundle();
-
                 querySkus.putStringArrayList(ITEM_ID_LIST, skuList);
-
                 try {
                     Bundle skuDetails = mService.getSkuDetails(BILLING_API_VERSION, mActivityContext.getPackageName(), INAPP, querySkus);
 
                     int response = skuDetails.getInt(RESPONSE_CODE);
-
                     if (response == BILLING_RESPONSE_RESULT_OK) {
                         ArrayList<String> responseList = skuDetails.getStringArrayList(DETAILS_LIST);
-
                         if (responseList == null) {
                             promise.reject(ERROR_PRODUCTS_LOAD_FAILED);
-
                             return;
                         }
 
                         WritableMap details = Arguments.createMap();
-
                         for (String thisResponse : responseList) {
                             WritableMap map = convertDataToMap(thisResponse);
-
                             details.putMap(map.getString(PROP_PRODUCT_ID), map);
                         }
+                        promise.resolve(details);
                     } else {
                         promise.reject(ERROR_PRODUCTS_LOAD_FAILED);
                     }
@@ -268,6 +298,16 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
                     REQUEST_CODE_PURCHASE, new Intent(), 0, 0, 0);
         } catch (Exception e) {
             purchase.getPromise().reject(e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void consumePurchase(final String purchaseToken, final Promise promise) {
+        try {
+            mService.consumePurchase(BILLING_API_VERSION, mActivityContext.getPackageName(), purchaseToken);
+//            promise.resolve("product consumed");      // is this necessary?
+        } catch (Exception e) {
+            promise.reject(e.getMessage());
         }
     }
 
