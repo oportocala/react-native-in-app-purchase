@@ -9,7 +9,6 @@ import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
-import android.util.Log;
 
 import com.android.vending.billing.IInAppBillingService;
 import com.facebook.react.bridge.Arguments;
@@ -26,7 +25,6 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 
 public class InAppPurchaseModule extends ReactContextBaseJavaModule {
@@ -39,6 +37,7 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
     private static final String DETAILS_LIST = "DETAILS_LIST";
     private static final String BUY_INTENT = "BUY_INTENT";
     private static final String INAPP_PURCHASE_DATA = "INAPP_PURCHASE_DATA";
+    private static final String INAPP_DATA_SIGNATURE = "INAPP_DATA_SIGNATURE";
     private static final String INAPP_PURCHASE_ITEM_LIST = "INAPP_PURCHASE_ITEM_LIST";
     private static final String INAPP_PURCHASE_DATA_LIST = "INAPP_PURCHASE_DATA_LIST";
     private static final String INAPP_DATA_SIGNATURE_LIST = "INAPP_DATA_SIGNATURE_LIST";
@@ -67,6 +66,10 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
     private static final String PROP_PRICE_CURRENCY_CODE = "price_currency_code";
     private static final String PROP_TITLE = "title";
     private static final String PROP_DESCRIPTION = "description";
+
+    // Wrapper key
+    private static final String PROP_DATA = "data";
+    private static final String PROP_SIGNATURE = "signature";
 
 
     private static final String ERROR_PRODUCTS_LOAD_FAILED = "Failed to load products";
@@ -190,13 +193,27 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
         }
     }
 
-    private void onPurchaseSuccess(final String data) {
+    private void onPurchaseSuccess(final String data, final String signature) {
         if (pendingPurchase != null) {
             try {
+                // wrap data & signature in 'outer' layer. data needs to be self contained so that
+                // it can be verified against the signature
+                WritableMap wrapper = Arguments.createMap();
+
+                // manually add purchase signature
+                if (signature != null && !signature.isEmpty())
+                    wrapper.putString(PROP_SIGNATURE, signature);
+
                 WritableMap details = convertDataToMap(data);
+                String token = null;
+                if (details.hasKey(PROP_DEVELOPER_PAYLOAD))
+                    token = details.getString(PROP_DEVELOPER_PAYLOAD);
+                wrapper.putMap(PROP_DATA, details);
                 // check developer token is valid
-                if (pendingPurchase.getToken().equals(details.getString(PROP_DEVELOPER_PAYLOAD))) {
-                    pendingPurchase.getPromise().resolve(details);
+                if (pendingPurchase.getToken().equals(token)) {
+                    // return wrapper, for access to both data and signature
+                    pendingPurchase.getPromise().resolve(wrapper);
+                    onPurchaseHandled();
                 } else {
                     onPurchaseError(ERROR_PURCHASE_VERIFICATION_FAILED);
                 }
@@ -304,16 +321,25 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void consumePurchase(final String purchaseToken, final Promise promise) {
-        try {
-            mService.consumePurchase(BILLING_API_VERSION, mActivityContext.getPackageName(), purchaseToken);
-        } catch (Exception e) {
-            promise.reject(e.getMessage());
-        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int response = -1;
+                try {
+                    response = mService.consumePurchase(BILLING_API_VERSION, mActivityContext.getPackageName(), purchaseToken);
+                } catch (Exception e) {
+                    promise.reject(e.getMessage());
+                }
+                if (response != 0)
+                    promise.reject("Purchase consume failed with error code: " + response);
+                else
+                    promise.resolve(null);
+            }
+        }).start();
     }
 
     @ReactMethod
     public void purchaseProduct(final String productId, final String token, final Promise promise) {
-Log.i("greer", "testing purchaseProduct");
         Purchase purchase = new Purchase(productId, token, promise);
 
         // Android provides us "onActivityResult" to handle purchase requests
@@ -332,7 +358,9 @@ Log.i("greer", "testing purchaseProduct");
         if (requestCode == REQUEST_CODE_PURCHASE) {
             switch (resultCode) {
                 case Activity.RESULT_OK:
-                    onPurchaseSuccess(data.getStringExtra(INAPP_PURCHASE_DATA));
+                    String purchaseData = data.getStringExtra(INAPP_PURCHASE_DATA);
+                    String purchaseSig = data.getStringExtra(INAPP_DATA_SIGNATURE);
+                    onPurchaseSuccess(purchaseData, purchaseSig);
                     break;
                 case Activity.RESULT_CANCELED:
                     onPurchaseError(ERROR_PURCHASE_CANCELLED);
