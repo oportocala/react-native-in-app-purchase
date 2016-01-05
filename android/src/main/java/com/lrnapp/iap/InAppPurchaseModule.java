@@ -208,7 +208,9 @@ public class InAppPurchaseModule extends ReactContextBaseJavaModule {
                 String token = null;
                 if (details.hasKey(PROP_DEVELOPER_PAYLOAD))
                     token = details.getString(PROP_DEVELOPER_PAYLOAD);
-                wrapper.putMap(PROP_DATA, details);
+                // put details as string to retain order
+                wrapper.putString(PROP_DATA, data);
+
                 // check developer token is valid
                 if (pendingPurchase.getToken().equals(token)) {
                     // return wrapper, for access to both data and signature
